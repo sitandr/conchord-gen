@@ -30,27 +30,24 @@ impl Tuning {
 
     fn find_chord_with_shift(&self, chord: Vec<u8>, shift: u8) -> Vec<FoundChord> {
         let first_note = chord.first().expect("Empty chord");
-        let first_note_oct_part: i16 = octave_part(*first_note).into();
 
         let mut collected = vec![];
         for first_string in 0..self.strings() {
             let base = self.notes[first_string] + shift;
             for possible in base..base+FRET_RANGE {
-                if same_note(possible, *first_note) {
-                    let this_oct: i16 = octave_part(possible).into();
-                    let note_shift: i16 = this_oct - first_note_oct_part;
-
-                    let shifted_chord: Vec<_> = chord.iter().map(|&n| (n as i16 + note_shift) as u8).collect();
-                    let found = self.find_chord_from_string(&shifted_chord[1..], first_string + 1, shift);
-                    collected.extend(found.extend_all((first_string, possible - base)));
+                if possible % 12 == *first_note {
+                    let mut left = chord.clone();
+                    left.remove(0);
+                    let found = self.find_chord_from_string(&chord, left, first_string + 1, shift);
+                    collected.extend(found.extend_all((self.strings() - first_string, possible - base)));
                 }
             }
         }
         collected
     }
 
-    fn find_chord_from_string(&self, shifted_chord: &[u8], start_string: usize, shift: u8) -> Vec<FoundChord> {
-        if start_string == self.strings() {
+    fn find_chord_from_string(&self, chord: &[u8], left: Vec<u8>, start_string: usize, shift: u8) -> Vec<FoundChord> {
+        if start_string == self.strings() && left.len() == 0 {
             return vec![FoundChord{hold: Vec::with_capacity(self.strings())}]
         }
 
@@ -58,9 +55,13 @@ impl Tuning {
         for first_string in start_string..self.strings() {
             let base = self.notes[first_string] + shift;
             for possible in base..base+FRET_RANGE {
-                if possible == shifted_chord[0] {
-                    let found = self.find_chord_from_string(&shifted_chord[1..], start_string + 1, shift);
-                    collected.extend(found.extend_all((first_string, possible - base)));
+                let possible_m = possible % 12;
+                if chord.contains(&possible_m) {
+                    let mut left = left.clone();
+                    left.retain(|&x| x != possible_m);
+                    let found = self.find_chord_from_string(chord, left, first_string + 1, shift);
+                    // println!("{}", start_string);
+                    collected.extend(found.extend_all((self.strings() - first_string, possible - base)));
                 }
             }
         }
@@ -85,21 +86,10 @@ impl ExtendAll<(usize, u8)> for Vec<FoundChord> {
     }
 } 
 
-#[inline]
-fn same_note(n1: u8, n2: u8) -> bool {
-    n1 % 12 == n2 % 12 
-}
-
-fn octave_part(n: u8) -> u8 {
-    (n / 12) * 12
-}
-
 fn note_to_pitch(n: &Note) -> u8 {
-    // SAFETY: Pitch and Octave are `repr(u8)`
+    // SAFETY: Pitch is `repr(u8)`
     let note_pitch: u8 = unsafe { *<*const _>::from(&n.pitch()).cast::<u8>() };
-    let octave: u8 = unsafe { *<*const _>::from(&n.octave()).cast::<u8>() };
-    // No overflow: max is `15*12 + 11 = 191 < 255``
-    note_pitch + octave * 12
+    note_pitch
 }
 
 fn main() {
@@ -108,13 +98,10 @@ fn main() {
     // let chord = Chord::parse("Cm7b5").unwrap().chord();
     println!("{:?}", Chord::parse("Bm7b5").unwrap().chord());
 
-    let tune_string = "E4 A4 D5 G5 B5 E6";
-    let tune_vec: Vec<_> = tune_string.split(' ').map(|s| {
-        Note::parse(&s[0..1]).unwrap().with_octave(Octave::try_from(s[1..].parse::<u8>().unwrap()).unwrap())
-    }).collect();
+    let tune_string = "E A D G B E";
+    let tune_vec: Vec<_> = tune_string.split(' ').map(Note::parse).map(|s| s.unwrap()).collect();
     let tuning = Tuning::new(&tune_vec);
-    println!("Searching for {:?}", Chord::parse("Dm").unwrap().chord());
 
-    println!("{:?}", tuning.find_chord(Chord::parse("Dm").unwrap().chord()));
+    println!("{:?}", tuning.find_chord(Chord::parse("Am").unwrap().chord()));
 }
 
