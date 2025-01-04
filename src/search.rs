@@ -32,9 +32,7 @@ impl Tuning {
         self.notes.len()
     }
 
-    fn find_chord(&self, chord: Vec<Note>, optional_fifth: u8) -> Vec<FoundChord> {
-        let chord: Vec<u8> = chord.iter().map(note_to_pitch).collect();
-
+    fn find_chord(&self, chord: Vec<u8>, optional_fifth: u8) -> Vec<FoundChord> {
         (0..11).flat_map(|s| self.find_chord_with_shift(&chord, s, optional_fifth).into_iter()).collect()
     }
 
@@ -132,25 +130,33 @@ impl FormattedChord {
         let under_deaf = deaf - upper_deaf;
 
         let quality = upper_deaf as f32 * 0.3 + under_deaf as f32 * 1.2;
-
+        
         let open = self.v.iter().filter(|&&e| e == Some(0)).count();
-        let open_up = self.v.iter().take_while(|&&e| e == Some(0)).count();
-        let holded = self.v.len() - open - deaf;
-
+        let min_open = self.v.iter().rev().enumerate().find(|&(_, &e)| e == Some(0)).map(|e| e.0 + 1).unwrap_or(0);
+         
         let min_b = self.v.iter().filter(|e| e.is_some() && e.unwrap() > 0).min().unwrap().unwrap();
+        let first_min = if min_b > 0 {self.v.iter().enumerate().find(|&(_, &e)| e.is_some() && e == Some(min_b)).unwrap().0} else {0};
         let max_h = self.v.iter().filter(|e| e.is_some() && e.unwrap() > 0).max().unwrap().unwrap();
-
         let mut amp_fine = (max_h - min_b).saturating_sub(2) as f32 * 0.2;
+        
+        let mut holded = self.v.len() - open - deaf;
 
-        let barre = if holded > 3 && min_b > 0 {min_b} else {0};
-        let holded = if barre > 0 {self.v.iter().filter(|e| e.is_some() && e.unwrap() > 0 && (e.unwrap() - barre > 0)).count()} else {holded};
+        let holded_at_barre = self.v.iter().skip(min_open).filter(|e| e.is_some() && e.unwrap() == min_b).count();
+        let barre = if holded >= 4 && holded_at_barre >= 2 && min_b > 0 && (min_open <= first_min) {min_b} else {0};
+        
+        if barre > 0 {
+            holded -= holded_at_barre;
+            // holded = self.v.iter().take(min_open).filter(|e| e.is_some() && e.unwrap() > 0).count();
+            // + 1 as we don't need to check opened string
+            // holded += self.v.iter().skip(min_open + 1).filter(|e| e.is_some() && e.unwrap() > 0 && (e.unwrap() - barre > 0)).count()  
+        };
 
         if barre > 0 {
             amp_fine *= 2.0
         }
         
         let barre_fine = if barre > 1 {0.3 + 0.05 * barre as f32} else if barre == 1 {0.5} else {0.0}; 
-        let open_up_barre_fine = if barre > 0 && open_up > 0 {0.3} else {0.0};
+        let open_up_barre_fine = if barre > 0 && min_open > 0 {0.3} else {0.0};
         let distance_fine = min_b as f32 * 0.08;
 
         let hold_fine = if barre == 0 {holded.saturating_sub(2) as f32 * 0.1} else {holded.saturating_sub(1) as f32 * 0.2};
@@ -199,17 +205,23 @@ fn note_to_pitch(n: &Note) -> u8 {
     note_pitch
 }
 
-pub fn build_chord_rank(tuning: Tuning, name: &str) -> Result<Vec<(Option<NotNan<f32>>, FormattedChord)>, String> {
+pub fn build_chord_rank(tuning: Tuning, name: &str, shift: u8) -> Result<Vec<(Option<NotNan<f32>>, FormattedChord)>, String> {
     let chord = Chord::parse(name).ok().ok_or(format!("{} is not a correct chord", name))?;
     let root = chord.root();
     let delta = root != chord.slash();
     let notes = chord.chord();
     let mut fifth_note = u8::MAX;
     if notes.len() - delta as usize > 3 {
-        fifth_note = chord.chord().into_iter().find(|&n| n - root == Interval::PerfectFifth).as_ref().map(note_to_pitch).unwrap_or(fifth_note);
+        fifth_note = chord.chord().iter().find(|&&n| n - root == Interval::PerfectFifth).map(note_to_pitch).unwrap_or(fifth_note);
     }
-    
-    let chords = tuning.find_chord(notes, fifth_note);
+    let notes: Vec<u8> = notes.iter().map(note_to_pitch).collect();
+
+    let chords;
+    if shift == u8::MAX {
+        chords = tuning.find_chord(notes, fifth_note);
+    } else {
+        chords = tuning.find_chord_with_shift(&notes, shift, fifth_note);
+    }
     let mut chords: Vec<_> = chords.into_iter()
         .map(|c| c.format(tuning.strings()))
         .map(|c| (c.evaluate_complexity(), c))
@@ -219,8 +231,8 @@ pub fn build_chord_rank(tuning: Tuning, name: &str) -> Result<Vec<(Option<NotNan
     Ok(chords)
 }
 
-pub fn search_chord(tuning: Tuning, name: &str) -> Result<Vec<String>, String> {
-    let mut strings: Vec<_> = build_chord_rank(tuning, name)?.into_iter().map(|e| e.1.to_string() + if e.1.no_fifth {"?"} else {""}).collect();
+pub fn search_chord(tuning: Tuning, name: &str, shift: u8) -> Result<Vec<String>, String> {
+    let mut strings: Vec<_> = build_chord_rank(tuning, name, shift)?.into_iter().map(|e| e.1.to_string() + if e.1.no_fifth {"?"} else {""}).collect();
     strings.dedup();
     Ok(strings)
 }
