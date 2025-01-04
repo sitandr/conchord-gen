@@ -6,8 +6,6 @@ use std::u8;
 
 use klib::core::base::Parsable;
 use klib::core::interval::Interval;
-use klib::core::known_chord::HasRelativeChord;
-use klib::core::known_chord::HasRelativeScale;
 use klib::core::note::*;
 use klib::core::chord::*;
 use klib::core::pitch::HasPitch;
