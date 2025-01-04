@@ -2,8 +2,12 @@ use std::fmt::Display;
 use std::hash::DefaultHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::u8;
 
 use klib::core::base::Parsable;
+use klib::core::interval::Interval;
+use klib::core::known_chord::HasRelativeChord;
+use klib::core::known_chord::HasRelativeScale;
 use klib::core::note::*;
 use klib::core::chord::*;
 use klib::core::pitch::HasPitch;
@@ -30,13 +34,14 @@ impl Tuning {
         self.notes.len()
     }
 
-    fn find_chord(&self, chord: Vec<Note>, optional_fifth: bool) -> Vec<FoundChord> {
+    fn find_chord(&self, chord: Vec<Note>, optional_fifth: u8) -> Vec<FoundChord> {
         let chord: Vec<u8> = chord.iter().map(note_to_pitch).collect();
 
         (0..11).flat_map(|s| self.find_chord_with_shift(&chord, s, optional_fifth).into_iter()).collect()
     }
 
-    fn find_chord_with_shift(&self, chord: &[u8], shift: u8, optional_fifth: bool) -> Vec<FoundChord> {
+    /// optional_fifth: from 0 to 12, if specified, this note could be ommited 
+    fn find_chord_with_shift(&self, chord: &[u8], shift: u8, optional_fifth: u8) -> Vec<FoundChord> {
         let first_note = chord.first().expect("Empty chord");
 
         let mut collected = vec![];
@@ -56,13 +61,13 @@ impl Tuning {
 
     // TODO: Gmaj7 dosn't give 324003
 
-    fn find_chord_from_string(&self, chord: &[u8], left: Vec<u8>, start_string: usize, shift: u8, optional_fifth: bool) -> Vec<FoundChord> {
+    fn find_chord_from_string(&self, chord: &[u8], left: Vec<u8>, start_string: usize, shift: u8, optional_fifth: u8) -> Vec<FoundChord> {
         if start_string == self.strings() {
             
             if left.len() == 0 {
                 return vec![FoundChord{hold: Vec::with_capacity(self.strings()), no_fifth: false}]
             }
-            else if optional_fifth && chord.len() > 3 && left.len() == 1 && left[0] == chord[2] {
+            else if left.len() == 1 && left[0] == optional_fifth {
                 return vec![FoundChord{hold: Vec::with_capacity(self.strings()), no_fifth: true}]
             }
         }
@@ -196,19 +201,28 @@ fn note_to_pitch(n: &Note) -> u8 {
     note_pitch
 }
 
-pub fn build_chord_rank(tuning: Tuning, name: &str) -> Vec<(Option<NotNan<f32>>, FormattedChord)> {
-    let chords = tuning.find_chord(Chord::parse(name).expect(&format!("{} Not a correct chord", name)).chord(), true);
+pub fn build_chord_rank(tuning: Tuning, name: &str) -> Result<Vec<(Option<NotNan<f32>>, FormattedChord)>, String> {
+    let chord = Chord::parse(name).ok().ok_or(format!("{} is not a correct chord", name))?;
+    let root = chord.root();
+    let delta = root != chord.slash();
+    let notes = chord.chord();
+    let mut fifth_note = u8::MAX;
+    if notes.len() - delta as usize > 3 {
+        fifth_note = chord.chord().into_iter().find(|&n| n - root == Interval::PerfectFifth).as_ref().map(note_to_pitch).unwrap_or(fifth_note);
+    }
+    
+    let chords = tuning.find_chord(notes, fifth_note);
     let mut chords: Vec<_> = chords.into_iter()
         .map(|c| c.format(tuning.strings()))
         .map(|c| (c.evaluate_complexity(), c))
         .filter(|c| c.0.is_some()).collect();
 
     chords.sort_by_key(|s| s.0);
-    chords
+    Ok(chords)
 }
 
-pub fn search_chord(tuning: Tuning, name: &str) -> Vec<String> {
-    let mut strings: Vec<_> = build_chord_rank(tuning, name).into_iter().map(|e| e.1.to_string() + if e.1.no_fifth {"?"} else {""}).collect();
+pub fn search_chord(tuning: Tuning, name: &str) -> Result<Vec<String>, String> {
+    let mut strings: Vec<_> = build_chord_rank(tuning, name)?.into_iter().map(|e| e.1.to_string() + if e.1.no_fifth {"?"} else {""}).collect();
     strings.dedup();
-    strings
+    Ok(strings)
 }
