@@ -5,3 +5,18 @@ edition = "2021"
 
 [dependencies]
 kord = { version = "0.7.1", default-features = false }
+ordered-float = "4.6.0"
+wasm-minimal-protocol = "0.1.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+
+[profile.release]
+lto = true          # Enable link-time optimization
+strip = true        # Strip symbols from binary*
+opt-level = 'z'     # Optimize for size
+codegen-units = 1   # Reduce number of codegen units to increase optimizations
+panic = 'abort'     # Abort on panic
+
+[workspace] # so that it is not included in the upper workspace
