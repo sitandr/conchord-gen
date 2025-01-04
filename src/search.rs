@@ -23,7 +23,7 @@ impl Tuning {
     }
 
     pub fn from_str(s: &str) -> Self {
-        let tune_vec: Vec<_> = s.split(' ').map(Note::parse).map(|s| s.unwrap()).collect();
+        let tune_vec: Vec<_> = s.split(' ').map(Note::parse).map(|s| s.expect("Bad tuning note")).collect();
         Tuning::new(&tune_vec)
     }
 
@@ -134,9 +134,9 @@ impl FormattedChord {
         let open = self.v.iter().filter(|&&e| e == Some(0)).count();
         let min_open = self.v.iter().rev().enumerate().find(|&(_, &e)| e == Some(0)).map(|e| e.0 + 1).unwrap_or(0);
          
-        let min_b = self.v.iter().filter(|e| e.is_some() && e.unwrap() > 0).min().unwrap().unwrap();
+        let min_b = self.v.iter().filter(|e| e.is_some() && e.unwrap() > 0).min().unwrap_or(&Some(0)).unwrap();
         let first_min = if min_b > 0 {self.v.iter().enumerate().find(|&(_, &e)| e.is_some() && e == Some(min_b)).unwrap().0} else {0};
-        let max_h = self.v.iter().filter(|e| e.is_some() && e.unwrap() > 0).max().unwrap().unwrap();
+        let max_h = self.v.iter().filter(|e| e.is_some() && e.unwrap() > 0).max().unwrap_or(&Some(0)).unwrap();
         let mut amp_fine = (max_h - min_b).saturating_sub(2) as f32 * 0.2;
         
         let mut holded = self.v.len() - open - deaf;
