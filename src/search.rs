@@ -35,7 +35,7 @@ impl Tuning {
         (0..11).flat_map(|s| self.find_chord_with_shift(chord, s, optional_fifth).into_iter()).collect()
     }
 
-    /// `optional_fifth`: from 0 to 12, if specified, this note could be ommited 
+    /// `optional_fifth`: from 0 to 12, if specified, this note could be omitted 
     fn find_chord_with_shift(&self, chord: &[u8], shift: u8, optional_fifth: u8) -> Vec<FoundChord> {
         let first_note = chord.first().expect("Empty chord");
 
@@ -101,7 +101,7 @@ impl FoundChord {
     fn format(&self, strings: usize) -> FormattedChord {
         let mut v = vec![None; strings];
         for holded in &self.hold {
-            assert_eq!(v[holded.0], None, "Dublicated strings: {self:?}?");
+            assert_eq!(v[holded.0], None, "Duplicated strings: {self:?}?");
             v[holded.0] = Some(holded.1);
         }
 
