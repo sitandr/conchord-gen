@@ -154,7 +154,7 @@ impl FormattedChord {
             _ => 0.0
         };
         let open_up_barre_fine = if barre > 0 && max_open > 0 {0.2 + max_open as f32 * 0.02} else {0.0};
-        let distance_fine = f32::from(max_h) * 0.08;
+        let distance_fine = f32::from(max_h).powf(1.5) * 0.05;
 
         let hold_fine = if barre == 0 {(holded.saturating_sub(1) as f32).powf(1.5) * 0.2} else {(holded as f32).powf(1.5) * 0.15};
 
