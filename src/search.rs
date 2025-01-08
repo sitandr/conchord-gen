@@ -2,6 +2,7 @@ use std::fmt::Display;
 use std::hash::DefaultHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::iter;
 
 use klib::core::base::Parsable;
 use klib::core::interval::Interval;
@@ -32,7 +33,7 @@ impl Tuning {
     }
 
     fn find_chord(&self, chord: &[u8], optional_fifth: u8) -> Vec<FoundChord> {
-        (0..11).flat_map(|s| self.find_chord_with_shift(chord, s, optional_fifth).into_iter()).collect()
+        (1..11).flat_map(|s| self.find_chord_with_shift(chord, s, optional_fifth).into_iter()).collect()
     }
 
     /// `optional_fifth`: from 0 to 12, if specified, this note could be omitted 
@@ -42,23 +43,22 @@ impl Tuning {
         let mut collected = vec![];
         for first_string in 0..self.strings() {
             let base = self.notes[first_string] + shift;
-            for possible in base..base+FRET_RANGE {
+            // all in range + open string
+            for possible in (base..base+FRET_RANGE).chain(iter::once(self.notes[first_string])) {
                 if possible % 12 == *first_note {
                     let mut left = chord.to_vec();
+                    // first note must me bass
                     left.remove(0);
                     let found = self.find_chord_from_string(chord, &left, first_string + 1, shift, optional_fifth);
-                    collected.extend(found.extend_all((first_string, possible - base + shift)));
+                    collected.extend(found.extend_all((first_string, possible + shift - base)));
                 }
             }
         }
         collected
     }
 
-    // TODO: Gmaj7 dosn't give 324003
-
     fn find_chord_from_string(&self, chord: &[u8], left: &[u8], start_string: usize, shift: u8, optional_fifth: u8) -> Vec<FoundChord> {
         if start_string == self.strings() {
-            
             if left.is_empty() {
                 return vec![FoundChord{hold: Vec::with_capacity(self.strings()), no_fifth: false}]
             }
@@ -70,14 +70,15 @@ impl Tuning {
         let mut collected = vec![];
         for first_string in start_string..self.strings() {
             let base = self.notes[first_string] + shift;
-            for possible in base..base+FRET_RANGE {
+            // all in range + open
+            for possible in (base..base+FRET_RANGE).chain(iter::once(self.notes[first_string])) {
                 let possible_m = possible % 12;
                 if chord.contains(&possible_m) {
                     let mut left = left.to_owned();
+                    // remove found notes from `left`
                     left.retain(|&x| x != possible_m);
                     let found = self.find_chord_from_string(chord, &left, first_string + 1, shift, optional_fifth);
-                    // println!("{}", start_string);
-                    collected.extend(found.extend_all((first_string, possible - base + shift)));
+                    collected.extend(found.extend_all((first_string, possible + shift - base)));
                 }
             }
         }
@@ -124,18 +125,18 @@ impl FormattedChord {
         let quality = upper_deaf as f32 * 0.3 + under_deaf as f32 * 1.2;
         
         let open = self.v.iter().filter(|&&e| e == Some(0)).count();
-        let min_open = self.v.iter().rev().enumerate().find(|&(_, &e)| e == Some(0)).map_or(0, |e| e.0 + 1);
-         
+        let max_open = self.v.iter().enumerate().rev().find(|&(_, &e)| e == Some(0)).map_or(0, |e| e.0 + 1);
+
         let min_b = self.v.iter().filter(|e| e.is_some() && e.unwrap() > 0).min().unwrap_or(&Some(0)).unwrap();
         let first_min = if min_b > 0 {self.v.iter().enumerate().find(|&(_, &e)| e.is_some() && e == Some(min_b)).unwrap().0} else {0};
         let max_h = self.v.iter().filter(|e| e.is_some() && e.unwrap() > 0).max().unwrap_or(&Some(0)).unwrap();
-        let mut amp_fine = f32::from((max_h - min_b).saturating_sub(2)) * 0.2;
+        let mut amp_fine = f32::from((max_h - min_b).saturating_sub(2)) * 0.23;
         
         let mut holded = self.v.len() - open - deaf;
 
-        let holded_at_barre = self.v.iter().skip(min_open).filter(|e| e.is_some() && e.unwrap() == min_b).count();
-        let barre = if holded >= 4 && holded_at_barre >= 2 && min_b > 0 && (min_open <= first_min) {min_b} else {0};
-        
+        let holded_at_barre = self.v.iter().skip(max_open).filter(|e| e.is_some() && e.unwrap() == min_b).count();
+        let barre = if holded >= 4 && holded_at_barre >= 2 && min_b > 0 && (max_open <= first_min) {min_b} else {0};
+
         if barre > 0 {
             holded -= holded_at_barre;
             // holded = self.v.iter().take(min_open).filter(|e| e.is_some() && e.unwrap() > 0).count();
@@ -144,18 +145,18 @@ impl FormattedChord {
         };
 
         if barre > 0 {
-            amp_fine *= 2.0;
+            amp_fine *= 1.5;
         }
         
         let barre_fine = match barre {
             1 => 0.5,
-            n if n > 1 => 0.3 + 0.05 * f32::from(barre),
+            n if n > 1 => 0.3 + 0.03 * f32::from(barre),
             _ => 0.0
         };
-        let open_up_barre_fine = if barre > 0 && min_open > 0 {0.3} else {0.0};
-        let distance_fine = f32::from(min_b) * 0.08;
+        let open_up_barre_fine = if barre > 0 && max_open > 0 {0.2 + max_open as f32 * 0.02} else {0.0};
+        let distance_fine = f32::from(max_h) * 0.08;
 
-        let hold_fine = if barre == 0 {holded.saturating_sub(2) as f32 * 0.1} else {holded.saturating_sub(1) as f32 * 0.2};
+        let hold_fine = if barre == 0 {(holded.saturating_sub(1) as f32).powf(1.5) * 0.2} else {(holded as f32).powf(1.5) * 0.15};
 
         if barre == 0 && holded > 4 || barre > 0 && holded > 3 {
             return None
@@ -208,6 +209,11 @@ fn note_to_pitch(n: &Note) -> u8 {
     note_pitch
 }
 
+fn check_matches_shift(chord: &FoundChord, shift: u8) -> bool {
+    let min_note = chord.hold.iter().filter_map(|(_, n)| if *n == 0 {None} else {Some(*n)} ).min().unwrap_or(0);
+    shift == min_note
+}
+
 type RankedChord = (Option<NotNan<f32>>, FormattedChord);
 
 pub fn build_chord_rank(tuning: &Tuning, name: &str, shift: u8) -> Result<Vec<RankedChord>, String> {
@@ -224,7 +230,11 @@ pub fn build_chord_rank(tuning: &Tuning, name: &str, shift: u8) -> Result<Vec<Ra
     let chords = if shift == u8::MAX {
         tuning.find_chord(&notes, fifth_note)
     } else {
-        tuning.find_chord_with_shift(&notes, shift, fifth_note)
+        // searching from 0 is in fact searching from 1
+        let find_shift = if shift == 0 {
+            1
+        } else {shift};
+        tuning.find_chord_with_shift(&notes, find_shift, fifth_note).into_iter().filter(|c| check_matches_shift(c, shift)).collect()
     };
     let mut chords: Vec<_> = chords.into_iter()
         .map(|c| c.format(tuning.strings()))
