@@ -1,7 +1,7 @@
 #![feature(iter_intersperse)]
 mod search;
 
-use search::{Tuning, search_chord};
+use search::{search_chord, Tuning};
 
 fn main() -> Result<(), String> {
     // TODO: use clap
@@ -9,8 +9,12 @@ fn main() -> Result<(), String> {
     if args.len() == 1 {
         println!("Write a chord name");
     }
-    
-    let tune_string = if args.len() == 2 {"E A D G B E"} else {&args[2]};
+
+    let tune_string = if args.len() == 2 {
+        "E1 A1 D2 G2 B2 E3"
+    } else {
+        &args[2]
+    };
 
     let strings = search_chord(&Tuning::from_str(tune_string), &args[1], u8::MAX)?;
 

@@ -8,6 +8,9 @@ use klib::core::base::Parsable;
 use klib::core::interval::Interval;
 use klib::core::note::Note;
 use klib::core::chord::{Chord, HasChord, HasRoot, HasSlash};
+use klib::core::note::NoteRecreator;
+use klib::core::octave::HasOctave;
+use klib::core::octave::Octave;
 use klib::core::pitch::HasPitch;
 use ordered_float::NotNan;
 
@@ -19,11 +22,11 @@ const FRET_RANGE: u8 = 5;
 
 impl Tuning {
     fn new(notes: &[Note]) -> Self {
-        Self{notes: notes.iter().map(note_to_pitch).collect()}
+        Self{notes: notes.iter().map(note_to_full_pitch).collect()}
     }
 
     pub fn from_str(s: &str) -> Self {
-        let tune_vec: Vec<_> = s.split(' ').map(Note::parse).map(|s| s.expect("Bad tuning note")).collect();
+        let tune_vec: Vec<_> = s.split(' ').map(|s| Note::parse(&s[..s.len()-1]).expect("Bad tuning note").with_octave(s[s.len()-1..].parse::<u8>().unwrap().try_into().unwrap())).collect();
         Tuning::new(&tune_vec)
     }
 
@@ -35,28 +38,15 @@ impl Tuning {
     fn find_chord(&self, chord: &[u8], optional_fifth: u8) -> Vec<FoundChord> {
         (1..11).flat_map(|s| self.find_chord_with_shift(chord, s, optional_fifth).into_iter()).collect()
     }
-
-    /// `optional_fifth`: from 0 to 12, if specified, this note could be omitted 
+ 
     fn find_chord_with_shift(&self, chord: &[u8], shift: u8, optional_fifth: u8) -> Vec<FoundChord> {
-        let first_note = chord.first().expect("Empty chord");
-
-        let mut collected = vec![];
-        for first_string in 0..self.strings() {
-            let base = self.notes[first_string] + shift;
-            // all in range + open string
-            for possible in (base..base+FRET_RANGE).chain(iter::once(self.notes[first_string])) {
-                if possible % 12 == *first_note {
-                    let mut left = chord.to_vec();
-                    // first note must me bass
-                    left.remove(0);
-                    let found = self.find_chord_from_string(chord, &left, first_string + 1, shift, optional_fifth);
-                    collected.extend(found.extend_all((first_string, possible + shift - base)));
-                }
-            }
-        }
-        collected
+        let mut found = self.find_chord_from_string(chord, &chord, 0, shift, optional_fifth);
+        found = found.into_iter().filter(|c| c.find_bas_note(self) == chord[0]).collect();
+        found
     }
 
+    
+    /// `optional_fifth`: from 0 to 12, if specified, this note could be omitted; if not possible there, pass u8::MAX
     fn find_chord_from_string(&self, chord: &[u8], left: &[u8], start_string: usize, shift: u8, optional_fifth: u8) -> Vec<FoundChord> {
         if start_string == self.strings() {
             if left.is_empty() {
@@ -107,6 +97,12 @@ impl FoundChord {
         }
 
         FormattedChord{v, no_fifth: self.no_fifth}
+    }
+
+    fn find_bas_note(&self, t: &Tuning) -> u8 {
+        let b = self.hold.iter().map(|&(string, h)| t.notes[string] + h).min().expect("Chord is empty") % 12;
+        // eprintln!("{}, {:?}", self.format(6), t.notes);
+        b
     }
 
     #[allow(dead_code)]
@@ -203,10 +199,18 @@ impl ExtendAll<(usize, u8)> for Vec<FoundChord> {
     }
 }
 
+#[inline]
 fn note_to_pitch(n: &Note) -> u8 {
     // SAFETY: Pitch is `repr(u8)`
     let note_pitch: u8 = unsafe { *<*const _>::from(&n.pitch()).cast::<u8>() };
     note_pitch
+}
+
+#[inline]
+fn note_to_full_pitch(n: &Note) -> u8 {
+    // SAFETY: Octave is `repr(u8)`
+    let octave_pitch: u8 = unsafe { *<*const _>::from(&n.octave()).cast::<u8>() };
+    note_to_pitch(n) + octave_pitch * 12
 }
 
 fn check_matches_shift(chord: &FoundChord, shift: u8) -> bool {
@@ -223,7 +227,7 @@ pub fn build_chord_rank(tuning: &Tuning, name: &str, shift: u8) -> Result<Vec<Ra
     let notes = chord.chord();
     let mut fifth_note = u8::MAX;
     if notes.len() - usize::from(delta) > 3 {
-        fifth_note = chord.chord().iter().find(|&&n| n - root == Interval::PerfectFifth).map_or(fifth_note, note_to_pitch);
+        fifth_note = chord.chord().iter().find(|&&n| n - root == Interval::PerfectFifth).map_or(u8::MAX, note_to_pitch);
     }
     let notes: Vec<u8> = notes.iter().map(note_to_pitch).collect();
 
