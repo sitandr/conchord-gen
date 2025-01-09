@@ -16,7 +16,8 @@ fn main() -> Result<(), String> {
         &args[2]
     };
 
-    let strings = search_chord(&Tuning::from_str(tune_string), &args[1], u8::MAX)?;
+    let tuning = Tuning::try_from_str(tune_string)?;
+    let strings = search_chord(&tuning, &args[1], u8::MAX, true)?;
 
     for s in strings {
         println!("{s}");

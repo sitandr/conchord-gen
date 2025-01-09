@@ -26,16 +26,20 @@ impl Tuning {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
-        let tune_vec: Vec<_> = s
+    pub fn from_str(s: &str) -> Option<Self> {
+        let tune_vec: Option<Vec<_>> = s
             .split(' ')
             .map(|s| {
                 Note::parse(&s[..s.len() - 1])
-                    .expect("Bad tuning note")
-                    .with_octave(s[s.len() - 1..].parse::<u8>().unwrap().try_into().unwrap())
+                    .ok()
+                    .map(|n| n.with_octave(s[s.len() - 1..].parse::<u8>().unwrap().try_into().unwrap()))
             })
             .collect();
-        Tuning::new(&tune_vec)
+        tune_vec.map(|t| Tuning::new(&t))
+    }
+
+    pub fn try_from_str(s: &str) -> Result<Self, String> {
+        Self::from_str(s).ok_or("Bad tonality string; ensure format is `A1 B2 C3`".to_owned())
     }
 
     #[inline]
@@ -43,10 +47,10 @@ impl Tuning {
         self.notes.len()
     }
 
-    fn find_chord(&self, chord: &[u8], optional_fifth: u8) -> Vec<FoundChord> {
+    fn find_chord(&self, chord: &[u8], optional_fifth: u8, true_bass: bool) -> Vec<FoundChord> {
         (1..11)
             .flat_map(|s| {
-                self.find_chord_with_shift(chord, s, optional_fifth)
+                self.find_chord_with_shift(chord, s, optional_fifth, true_bass)
                     .into_iter()
             })
             .collect()
@@ -57,16 +61,16 @@ impl Tuning {
         chord: &[u8],
         shift: u8,
         optional_fifth: u8,
+        true_bass: bool
     ) -> Vec<FoundChord> {
-        let mut found = self.find_chord_from_string(chord, &chord, 0, shift, optional_fifth);
-        found = found
-            .into_iter()
-            .filter(|c| c.find_bas_note(self) == chord[0])
-            .collect();
+        let mut found = self.find_chord_from_string(chord, chord, 0, shift, optional_fifth);
+        if true_bass {
+            found.retain(|c| c.find_bas_note(self) == chord[0]);
+        }
         found
     }
 
-    /// `optional_fifth`: from 0 to 12, if specified, this note could be omitted; if not possible there, pass u8::MAX
+    /// `optional_fifth`: from 0 to 12, if specified, this note could be omitted; if not possible there, pass `u8::MAX`
     fn find_chord_from_string(
         &self,
         chord: &[u8],
@@ -148,7 +152,7 @@ impl FoundChord {
             .min()
             .expect("Chord is empty")
             % 12;
-        // eprintln!("{}, {:?}", self.format(6), t.notes);
+        eprintln!("{}, {:?}", self.format(6), b);
         b
     }
 
@@ -357,7 +361,11 @@ pub fn build_chord_rank(
     tuning: &Tuning,
     name: &str,
     shift: u8,
+    true_bass: bool
 ) -> Result<Vec<RankedChord>, String> {
+    // 
+    let true_bass = if name.contains("/") {true} else {true_bass};
+
     let chord = Chord::parse(name)
         .ok()
         .ok_or(format!("{name} is not a correct chord"))?;
@@ -375,12 +383,12 @@ pub fn build_chord_rank(
     let notes: Vec<u8> = notes.iter().map(note_to_pitch).collect();
 
     let chords = if shift == u8::MAX {
-        tuning.find_chord(&notes, fifth_note)
+        tuning.find_chord(&notes, fifth_note, true_bass)
     } else {
         // searching from 0 is in fact searching from 1
         let find_shift = if shift == 0 { 1 } else { shift };
         tuning
-            .find_chord_with_shift(&notes, find_shift, fifth_note)
+            .find_chord_with_shift(&notes, find_shift, fifth_note, true_bass)
             .into_iter()
             .filter(|c| check_matches_shift(c, shift))
             .collect()
@@ -396,8 +404,8 @@ pub fn build_chord_rank(
     Ok(chords)
 }
 
-pub fn search_chord(tuning: &Tuning, name: &str, shift: u8) -> Result<Vec<String>, String> {
-    let mut strings: Vec<_> = build_chord_rank(tuning, name, shift)?
+pub fn search_chord(tuning: &Tuning, name: &str, shift: u8, true_bass: bool) -> Result<Vec<String>, String> {
+    let mut strings: Vec<_> = build_chord_rank(tuning, name, shift, true_bass)?
         .into_iter()
         .map(|e| e.1.to_string() + if e.1.no_fifth { "?" } else { "" })
         .collect();
