@@ -152,7 +152,6 @@ impl FoundChord {
             .min()
             .expect("Chord is empty")
             % 12;
-        eprintln!("{}, {:?}", self.format(6), b);
         b
     }
 
@@ -363,7 +362,7 @@ pub fn build_chord_rank(
     shift: u8,
     true_bass: bool
 ) -> Result<Vec<RankedChord>, String> {
-    // 
+    // if slash is there, user wants true bass for sure
     let true_bass = if name.contains("/") {true} else {true_bass};
 
     let chord = Chord::parse(name)
