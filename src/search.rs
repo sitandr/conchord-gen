@@ -79,21 +79,25 @@ impl Tuning {
         shift: u8,
         optional_fifth: u8,
     ) -> Vec<FoundChord> {
+
+        let mut collected = if left.is_empty() {
+            vec![FoundChord {
+                hold: Vec::with_capacity(self.strings()),
+                no_fifth: false,
+            }]
+        } else if left.len() == 1 && left[0] == optional_fifth {
+            vec![FoundChord {
+                hold: Vec::with_capacity(self.strings()),
+                no_fifth: true,
+            }]
+        } else {
+            vec![]
+        };
+
         if start_string == self.strings() {
-            if left.is_empty() {
-                return vec![FoundChord {
-                    hold: Vec::with_capacity(self.strings()),
-                    no_fifth: false,
-                }];
-            } else if left.len() == 1 && left[0] == optional_fifth {
-                return vec![FoundChord {
-                    hold: Vec::with_capacity(self.strings()),
-                    no_fifth: true,
-                }];
-            }
+            return collected;
         }
 
-        let mut collected = vec![];
         for first_string in start_string..self.strings() {
             let base = self.notes[first_string] + shift;
             // all in range + open
@@ -363,7 +367,7 @@ pub fn build_chord_rank(
     true_bass: bool
 ) -> Result<Vec<RankedChord>, String> {
     // if slash is there, user wants true bass for sure
-    let true_bass = if name.contains("/") {true} else {true_bass};
+    let true_bass = if name.contains('/') {true} else {true_bass};
 
     let chord = Chord::parse(name)
         .ok()
