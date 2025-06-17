@@ -7,7 +7,7 @@ fn main() -> Result<(), String> {
     // TODO: use clap
     let args: Vec<_> = std::env::args().collect();
     if args.len() == 1 {
-        println!("Write a chord name");
+        return Err("Write a chord name".to_string());
     }
 
     let tune_string = if args.len() == 2 {

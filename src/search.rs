@@ -7,6 +7,7 @@ use std::iter;
 use klib::core::base::Parsable;
 use klib::core::chord::{Chord, HasChord, HasRoot, HasSlash};
 use klib::core::interval::Interval;
+use klib::core::interval::ALL_INTERVALS;
 use klib::core::note::Note;
 use klib::core::note::NoteRecreator;
 use klib::core::octave::HasOctave;
@@ -80,6 +81,8 @@ impl Tuning {
         optional_fifth: u8,
     ) -> Vec<FoundChord> {
 
+        // 50x550 ?
+
         let mut collected = if left.is_empty() {
             vec![FoundChord {
                 hold: Vec::with_capacity(self.strings()),
@@ -93,10 +96,6 @@ impl Tuning {
         } else {
             vec![]
         };
-
-        if start_string == self.strings() {
-            return collected;
-        }
 
         for first_string in start_string..self.strings() {
             let base = self.notes[first_string] + shift;
@@ -360,6 +359,19 @@ fn check_matches_shift(chord: &FoundChord, shift: u8) -> bool {
 
 type RankedChord = (Option<NotNan<f32>>, FormattedChord);
 
+/// Safely substracts one note from other with None if not found
+fn safe_note_sub(n1: Note, n2: Note) -> Option<Interval> {
+    let (low, high) = if n1 < n2 { (n1, n2) } else { (n2, n1) };
+
+    for interval in ALL_INTERVALS.iter() {
+        if low + *interval == high {
+            return Some(*interval);
+        }
+    }
+
+    return None
+}
+
 pub fn build_chord_rank(
     tuning: &Tuning,
     name: &str,
@@ -373,6 +385,7 @@ pub fn build_chord_rank(
         .ok()
         .ok_or(format!("{name} is not a correct chord"))?;
     let root = chord.root();
+    // TODO: implement A5b5 chords
     let delta = root != chord.slash();
     let notes = chord.chord();
     let mut fifth_note = u8::MAX;
@@ -380,7 +393,7 @@ pub fn build_chord_rank(
         fifth_note = chord
             .chord()
             .iter()
-            .find(|&&n| n - root == Interval::PerfectFifth)
+            .find(|&&n| safe_note_sub(n, root) == Some(Interval::PerfectFifth))
             .map_or(u8::MAX, note_to_pitch);
     }
     let notes: Vec<u8> = notes.iter().map(note_to_pitch).collect();
