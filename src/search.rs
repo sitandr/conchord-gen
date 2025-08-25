@@ -128,6 +128,7 @@ struct FoundChord {
     no_fifth: bool,
 }
 
+#[derive(PartialEq)]
 pub struct FormattedChord {
     v: Vec<Option<u8>>,
     no_fifth: bool,
@@ -172,7 +173,7 @@ impl FormattedChord {
         let under_deaf = self.v.iter().rev().take_while(|e| e.is_none()).count();
         let inner_deaf = deaf - upper_deaf - under_deaf;
 
-        let quality = (upper_deaf as f32 * 0.3 + under_deaf as f32 * 2.).min(upper_deaf as f32 * 2. + under_deaf as f32 * 0.3) + (inner_deaf as f32 * 3.0) + (deaf as f32).powf(2.) * 0.1;
+        let quality = (upper_deaf as f32 * 0.3 + under_deaf as f32 * 2.).min(upper_deaf as f32 * 2. + under_deaf as f32 * 0.3) + (inner_deaf as f32 * 3.0) + (deaf as f32).powf(1.5) * 0.3;
 
         let open = self.v.iter().filter(|&&e| e == Some(0)).count();
         let max_open = self
@@ -207,65 +208,67 @@ impl FormattedChord {
             .max()
             .unwrap_or(&Some(0))
             .unwrap();
-        let mut amp_fine = f32::from((max_h - min_b).saturating_sub(2)) * 0.23;
         let mut adjacent_distance_fine = 0.0;
-
+        
         let mut prev_pos = None;
-        let mut d_count = 0;
+        let mut d_count = 0.0;
         for n in self.v.iter() {
             if let Some(n) = n && *n > 0 {
                 if let Some(p) = prev_pos {
-                    adjacent_distance_fine += (n.abs_diff(p) as f32 + d_count as f32).powf(1.5)*0.2;
+                    adjacent_distance_fine += (n.abs_diff(p) as f32 + d_count).powf(1.5)*0.15;
                 }
                 prev_pos = Some(*n);
             } else {
                 if prev_pos.is_some() {
-                    d_count += 1;
+                    d_count = 1.0;
                 }
             }
         }
-
+        
         let mut holded = self.v.len() - open - deaf;
-
+        
         let holded_at_barre = self
-            .v
-            .iter()
-            .skip(max_open)
-            .filter(|e| e.is_some() && e.unwrap() == min_b)
-            .count();
-        let barre = if holded >= 4 && holded_at_barre >= 2 && min_b > 0 && (max_open <= first_min) {
-            min_b
-        } else {
-            0
-        };
-
-        if barre > 0 {
-            holded -= holded_at_barre;
-            // holded = self.v.iter().take(min_open).filter(|e| e.is_some() && e.unwrap() > 0).count();
-            // + 1 as we don't need to check opened string
-            // holded += self.v.iter().skip(min_open + 1).filter(|e| e.is_some() && e.unwrap() > 0 && (e.unwrap() - barre > 0)).count()
-        };
-
-        if barre > 0 {
-            amp_fine *= 1.5;
-        }
-
-        let barre_fine = match barre {
-            1 => 0.5,
-            n if n > 1 => 0.3 + 0.03 * f32::from(barre),
-            _ => 0.0,
-        };
+        .v
+        .iter()
+        .skip(max_open)
+        .filter(|e| e.is_some() && e.unwrap() == min_b)
+        .count();
+    let barre = if holded >= 4 && holded_at_barre >= 2 && min_b > 0 && (max_open <= first_min) {
+        min_b
+    } else {
+        0
+    };
+    
+    if barre > 0 {
+        holded -= holded_at_barre;
+        // holded = self.v.iter().take(min_open).filter(|e| e.is_some() && e.unwrap() > 0).count();
+        // + 1 as we don't need to check opened string
+        // holded += self.v.iter().skip(min_open + 1).filter(|e| e.is_some() && e.unwrap() > 0 && (e.unwrap() - barre > 0)).count()
+    };
+    
+    let mut amp_fine = f32::from((max_h - min_b).saturating_sub(2)) * 0.23;
+    if barre > 0 {
+        amp_fine = amp_fine.powf(2.) * 16.;
+    }
+    
+    let barre_fine = match barre {
+        1 => 0.5,
+        n if n > 1 => 0.3 + 0.03 * f32::from(barre),
+        _ => 0.0,
+    };
         let open_up_barre_fine = if barre > 0 && max_open > 0 {
-            0.2 + max_open as f32 * 0.02
+            0.4 + max_open as f32 * 0.1
         } else {
             0.0
         };
-        let distance_fine = f32::from(max_h).powf(1.5) * 0.09;
+        let distance_fine = f32::from(max_h).powf(1.8) * 0.04;
 
         let hold_fine = if barre == 0 {
-            (holded.saturating_sub(1) as f32).powf(1.5) * 0.2
+            if holded == 4 {
+                1.0
+            } else {holded as f32 / 10.0}
         } else {
-            (holded as f32).powf(1.5) * 0.15
+            (holded as f32).powf(1.7) * 0.2
         };
 
         if barre == 0 && holded > 4 || barre > 0 && holded > 3 {
@@ -275,7 +278,7 @@ impl FormattedChord {
         if self
             .v
             .iter()
-            .all(|&s| if let Some(s) = s { s >= 12 } else { true })
+            .all(|&s| if let Some(s) = s { s >= 12 || s == 0 } else { true })
         {
             return None;
         }
@@ -292,7 +295,7 @@ impl FormattedChord {
                     + distance_fine
                     + adjacent_distance_fine
                     + rand_part;
-        if DEBUG {
+        if cfg!(debug_assertions) && DEBUG {
             println!("sum={sum}, q={quality} b={barre_fine} ob={open_up_barre_fine} h={hold_fine} a={amp_fine} d={distance_fine} ad={adjacent_distance_fine} r={rand_part}")
         }
 
@@ -475,6 +478,7 @@ pub fn build_chord_rank(
         .collect();
 
     chords.sort_by_key(|s| s.0);
+    chords.dedup();
     if cfg!(debug_assertions) {
         chords.iter().for_each(|c| {
             println!("{}", c.1.to_string());
