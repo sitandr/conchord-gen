@@ -1,11 +1,11 @@
 [package]
 name = "conchord-gen"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 kord = { version = "0.7.1", default-features = false }
-ordered-float = "4.6.0"
+ordered-float = "5.0.0"
 wasm-minimal-protocol = {version = "0.1.0", optional = true}
 
 [lib]
@@ -17,7 +17,7 @@ crate-type = ["cdylib"]
 [features]
 build-binary = ["wasm-minimal-protocol"]
 
-# cargo run --bin cli --silent -- "Cmaj7/E" 
+# cargo run --bin cli --quiet -- "Cmaj7/E" 
 [[bin]]
 name = "cli"
 path="src/cli.rs"

@@ -166,12 +166,13 @@ impl FoundChord {
 
 impl FormattedChord {
     #[allow(clippy::cast_precision_loss)]
-    fn evaluate_complexity(&self) -> Option<NotNan<f32>> {
+    fn evaluate_complexity<const DEBUG: bool>(&self) -> Option<NotNan<f32>> {
         let deaf = self.v.iter().filter(|e| e.is_none()).count();
         let upper_deaf = self.v.iter().take_while(|e| e.is_none()).count();
-        let under_deaf = deaf - upper_deaf;
+        let under_deaf = self.v.iter().rev().take_while(|e| e.is_none()).count();
+        let inner_deaf = deaf - upper_deaf - under_deaf;
 
-        let quality = upper_deaf as f32 * 0.3 + under_deaf as f32 * 1.2;
+        let quality = (upper_deaf as f32 * 0.3 + under_deaf as f32 * 2.).min(upper_deaf as f32 * 2. + under_deaf as f32 * 0.3) + (inner_deaf as f32 * 3.0) + (deaf as f32).powf(2.) * 0.1;
 
         let open = self.v.iter().filter(|&&e| e == Some(0)).count();
         let max_open = self
@@ -207,6 +208,22 @@ impl FormattedChord {
             .unwrap_or(&Some(0))
             .unwrap();
         let mut amp_fine = f32::from((max_h - min_b).saturating_sub(2)) * 0.23;
+        let mut adjacent_distance_fine = 0.0;
+
+        let mut prev_pos = None;
+        let mut d_count = 0;
+        for n in self.v.iter() {
+            if let Some(n) = n && *n > 0 {
+                if let Some(p) = prev_pos {
+                    adjacent_distance_fine += (n.abs_diff(p) as f32 + d_count as f32).powf(1.5)*0.2;
+                }
+                prev_pos = Some(*n);
+            } else {
+                if prev_pos.is_some() {
+                    d_count += 1;
+                }
+            }
+        }
 
         let mut holded = self.v.len() - open - deaf;
 
@@ -243,7 +260,7 @@ impl FormattedChord {
         } else {
             0.0
         };
-        let distance_fine = f32::from(max_h).powf(1.5) * 0.05;
+        let distance_fine = f32::from(max_h).powf(1.5) * 0.09;
 
         let hold_fine = if barre == 0 {
             (holded.saturating_sub(1) as f32).powf(1.5) * 0.2
@@ -267,17 +284,20 @@ impl FormattedChord {
         #[allow(clippy::cast_precision_loss)]
         let rand_part = (calculate_hash(&self.v) as f32) / u64::MAX as f32 * 1e-5;
 
-        Some(
-            NotNan::new(
-                quality
+        let sum = quality
                     + barre_fine
                     + open_up_barre_fine
                     + hold_fine
                     + amp_fine
                     + distance_fine
-                    + rand_part,
-            )
-            .unwrap(),
+                    + adjacent_distance_fine
+                    + rand_part;
+        if DEBUG {
+            println!("sum={sum}, q={quality} b={barre_fine} ob={open_up_barre_fine} h={hold_fine} a={amp_fine} d={distance_fine} ad={adjacent_distance_fine} r={rand_part}")
+        }
+
+        Some(
+            NotNan::new(sum).unwrap(),
         )
     }
 }
@@ -372,29 +392,67 @@ fn safe_note_sub(n1: Note, n2: Note) -> Option<Interval> {
     return None
 }
 
+/// if is 5 chord, returns name without "5"
+fn is_5_chord(name: &str) -> Option<String> {
+    
+    let mut nchars = name.char_indices();
+    nchars.next();
+    let second = nchars.next();
+    let third = nchars.next();
+
+    if let Some((s, '5')) = second {
+        return Some(format!("{}{}", &name[0..s], &name[s+1..]))
+    }
+
+    if let Some((s, '5')) = third {
+        return Some(format!("{}{}", &name[0..s], &name[s+1..]))
+    }
+    return None
+}
+
+fn is_third(i: Interval) -> bool {
+    match i {
+        Interval::MajorThird | Interval::MinorThird | Interval::AugmentedThird | Interval::DiminishedThird | Interval::TwoPerfectOctavesAndMajorThird | Interval::ThreePerfectOctavesAndMajorThird => true,
+        _ => false
+    }
+}
+
 pub fn build_chord_rank(
     tuning: &Tuning,
     name: &str,
     shift: u8,
     true_bass: bool
 ) -> Result<Vec<RankedChord>, String> {
+    let mut name = name;
     // if slash is there, user wants true bass for sure
     let true_bass = if name.contains('/') {true} else {true_bass};
+
+    // to add support of X5 chords, remove 5 and remember
+    let mut is_actually_5_chord = false;
+    let without_5 = is_5_chord(name);
+    if let Some(name_without_5) = without_5.as_ref() {
+        name = &name_without_5;
+        is_actually_5_chord = true;
+    }
 
     let chord = Chord::parse(name)
         .ok()
         .ok_or(format!("{name} is not a correct chord"))?;
     let root = chord.root();
-    // TODO: implement A5b5 chords
     let delta = root != chord.slash();
-    let notes = chord.chord();
+    let mut notes = chord.chord();
     let mut fifth_note = u8::MAX;
     if notes.len() - usize::from(delta) > 3 {
-        fifth_note = chord
-            .chord()
+        fifth_note = notes
             .iter()
             .find(|&&n| safe_note_sub(n, root) == Some(Interval::PerfectFifth))
             .map_or(u8::MAX, note_to_pitch);
+    }
+    // in this case, we should remove third 
+    if is_actually_5_chord {
+        notes = notes
+            .into_iter()
+            .filter(|&n| !safe_note_sub(n, root).map(is_third).unwrap_or(false)).collect();
     }
     let notes: Vec<u8> = notes.iter().map(note_to_pitch).collect();
 
@@ -412,11 +470,17 @@ pub fn build_chord_rank(
     let mut chords: Vec<_> = chords
         .into_iter()
         .map(|c| c.format(tuning.strings()))
-        .map(|c| (c.evaluate_complexity(), c))
+        .map(|c| (c.evaluate_complexity::<false>(), c))
         .filter(|c| c.0.is_some())
         .collect();
 
     chords.sort_by_key(|s| s.0);
+    if cfg!(debug_assertions) {
+        chords.iter().for_each(|c| {
+            println!("{}", c.1.to_string());
+            c.1.evaluate_complexity::<true>();
+        });
+    }
     Ok(chords)
 }
 
